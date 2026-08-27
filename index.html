@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ayep Blass 24</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+*{box-sizing:border-box;font-family:Arial,sans-serif}body{margin:0;background:#0b1120;color:#fff}
+button,input{border:0;border-radius:10px;padding:11px}button{background:#f5b400;font-weight:700;cursor:pointer}
+input{width:100%;margin:6px 0;background:#111827;color:#fff;border:1px solid #334155}
+.hidden{display:none!important}.wrap{max-width:1100px;margin:auto;padding:20px}
+.card{background:#172033;border:1px solid #29364b;border-radius:16px;padding:20px}
+#auth{min-height:100vh;display:grid;place-items:center;padding:20px}.auth{width:min(420px,100%);text-align:center}
+.tabs{display:flex;gap:8px}.tabs button{flex:1}.msg{min-height:24px;color:#fbbf24}
+header{height:64px;background:#111827;display:flex;align-items:center;gap:12px;padding:0 16px}
+.brand{font-weight:800;margin-right:auto}.container{max-width:1100px;margin:auto;padding:18px;display:grid;grid-template-columns:1fr 340px;gap:18px}
+canvas{display:block;width:min(440px,100%);height:auto;margin:15px auto;background:#080d18;border-radius:12px;touch-action:none}
+.stats{display:flex;justify-content:space-around;font-size:18px;margin:12px}.side{display:flex;flex-direction:column;gap:18px}
+.list{max-height:220px;overflow:auto}.item{padding:9px 0;border-bottom:1px solid #29364b}
+.chat{display:flex;gap:6px}.chat input{margin:0}.chat button{white-space:nowrap}
+.admin{margin-top:18px}.request{background:#111827;padding:12px;border-radius:10px;margin:8px 0}.ok{background:#22c55e}.no{background:#ef4444;color:white}
+@media(max-width:800px){.container{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<section id="auth">
+  <div class="card auth">
+    <h1>🧱 AYEP BLASS <span style="color:#f5b400">24</span></h1>
+    <p>Multiplayer block puzzle — koin virtual</p>
+    <div class="tabs">
+      <button onclick="setMode('login')">Login</button>
+      <button onclick="setMode('register')">Daftar</button>
+    </div>
+    <input id="username" placeholder="Username" autocomplete="username">
+    <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+    <button id="authBtn" style="width:100%" onclick="auth()">LOGIN</button>
+    <div id="msg" class="msg"></div>
+  </div>
+</section>
+
+<section id="app" class="hidden">
+<header>
+  <div class="brand">🧱 AYEP BLASS 24</div>
+  <div>👤 <b id="user"></b> · 🪙 <b id="coins">0</b></div>
+  <button onclick="logout()">Keluar</button>
+</header>
+
+<div class="container">
+  <section>
+    <div class="card">
+      <h2 style="text-align:center">Block Puzzle</h2>
+      <div class="stats"><span>🪙 <b id="coins2">0</b></span><span>⭐ <b id="score">0</b></span></div>
+      <canvas id="board" width="440" height="440"></canvas>
+      <p style="text-align:center;color:#94a3b8">Susun blok. Lengkapi baris/kolom untuk mendapat poin.</p>
+      <button onclick="openDepositChat()" style="display:block;margin:auto">💬 DEPO</button>
+    </div>
+
+    <div id="adminPanel" class="card admin hidden">
+      <h2>👑 Panel Admin</h2>
+      <h3>🔔 Permintaan Akun</h3>
+      <button onclick="pending()">Refresh</button>
+      <div id="pending" class="list"></div>
+      <h3>👥 Member</h3>
+      <button onclick="members()">Refresh</button>
+      <div id="members" class="list"></div>
+    </div>
+  </section>
+
+  <aside class="side">
+    <div class="card"><h3>👥 Online</h3><div id="players" class="list">-</div></div>
+    <div class="card">
+      <h3>💬 Chat Admin</h3>
+      <div id="chat" class="list"></div>
+      <div class="chat">
+        <input id="chatInput" placeholder="Tulis pesan..." onkeydown="if(event.key==='Enter')sendChat()">
+        <button onclick="sendChat()">Kirim</button>
+      </div>
+    </div>
+  </aside>
+</div>
+</section>
+
+<script>
+const API="";
+let mode="login",token=localStorage.getItem("ayep_token"),me=null,socket=null;
+const isAdminUrl=new URLSearchParams(location.search).get("role")==="admin";
+const canvas=document.getElementById("board"),ctx=canvas.getContext("2d");
+const N=8,S=55; let board=Array.from({length:N},()=>Array(N).fill(0)),score=0;
+
+function setMode(m){mode=m;document.getElementById("authBtn").textContent=m==="login"?"LOGIN":"DAFTAR";document.getElementById("msg").textContent=""}
+async function auth(){
+ const username=document.getElementById("username").value.trim().toLowerCase(),password=document.getElementById("password").value,msg=document.getElementById("msg");
+ if(!username||!password){msg.textContent="Lengkapi data.";return}
+ try{
+  const r=await fetch(API+(mode==="login"?"/api/login":"/api/register"),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username,password})});
+  const d=await r.json(); if(!r.ok){msg.textContent=d.error||"Gagal.";return}
+  if(mode==="register"){msg.textContent="Akun dibuat. Tunggu ACC admin.";return}
+  token=d.token;localStorage.setItem("ayep_token",token);me=d.user;openApp();
+ }catch(e){msg.textContent="Server tidak tersedia."}
+}
+async function openApp(){
+ document.getElementById("auth").classList.add("hidden");document.getElementById("app").classList.remove("hidden");
+ document.getElementById("user").textContent=me.username;setCoins(me.coins||0);
+ if(me.role==="admin"&&isAdminUrl){document.getElementById("adminPanel").classList.remove("hidden");pending();members()}
+ connect();draw();
+}
+function connect(){
+ socket=io();
+ socket.on("connect",()=>socket.emit("joinGame",{token}));
+ socket.on("joined",d=>setCoins(d.coins));
+ socket.on("players",p=>document.getElementById("players").innerHTML=p.map(x=>`<div class="item">🟢 ${esc(x.username)}</div>`).join("")||"-");
+ socket.on("chat",d=>addChat(d.username,d.text));
+ socket.on("coinUpdate",d=>{if(d.username===me.username)setCoins(d.coins)});
+ socket.on("registrationRequest",()=>{if(me.role==="admin"&&isAdminUrl)pending()});
+}
+function setCoins(n){document.getElementById("coins").textContent=n;document.getElementById("coins2").textContent=n;if(me)me.coins=n}
+function sendChat(){const i=document.getElementById("chatInput"),t=i.value.trim();if(t&&socket){socket.emit("chat",t);i.value=""}}
+function addChat(u,t){const c=document.getElementById("chat");c.insertAdjacentHTML("beforeend",`<div class="item"><b>${esc(u)}</b>: ${esc(t)}</div>`);c.scrollTop=c.scrollHeight}
+function openDepositChat(){const i=document.getElementById("chatInput");i.value="Halo Admin, saya ingin DEPO koin virtual.";i.focus()}
+async function pending(){
+ if(!me||me.role!=="admin")return;const r=await fetch("/api/admin/pending",{headers:{Authorization:"Bearer "+token}});if(!r.ok)return;
+ const a=await r.json();document.getElementById("pending").innerHTML=a.length?a.map(u=>`<div class="request"><b>${esc(u.username)}</b><br><button class="ok" onclick="approve('${esc(u.username)}')">ACC</button> <button class="no" onclick="reject('${esc(u.username)}')">Tolak</button></div>`).join(""):"Tidak ada permintaan.";
+}
+async function approve(username){await adminPost("/api/admin/approve",{username});pending();members()}
+async function reject(username){await adminPost("/api/admin/reject",{username});pending()}
+async function members(){
+ if(!me||me.role!=="admin")return;const r=await fetch("/api/admin/users",{headers:{Authorization:"Bearer "+token}});if(!r.ok)return;
+ const a=await r.json();document.getElementById("members").innerHTML=a.map(u=>`<div class="item"><b>${esc(u.username)}</b> · 🪙 ${u.coins} ${u.role==="member"?`<button onclick="give('${esc(u.username)}',100)">+100</button>`:""}</div>`).join("");
+}
+async function give(username,amount){await adminPost("/api/admin/coins",{username,amount});members()}
+async function adminPost(url,body){const r=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body)});const d=await r.json();if(!r.ok)alert(d.error||"Gagal")}
+function logout(){localStorage.removeItem("ayep_token");location.href="/"}
+function esc(x){return String(x).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[c]))}
+
+canvas.addEventListener("pointerdown",e=>{
+ const r=canvas.getBoundingClientRect(),x=Math.floor((e.clientX-r.left)/r.width*N),y=Math.floor((e.clientY-r.top)/r.height*N);
+ if(x<0||y<0||x>=N||y>=N)return;board[y][x]^=1;check();draw();if(socket)socket.emit("state",{board,score});
+});
+function check(){
+ let n=0;
+ for(let y=0;y<N;y++)if(board[y].every(Boolean)){board[y].fill(0);n++}
+ for(let x=0;x<N;x++){let f=true;for(let y=0;y<N;y++)if(!board[y][x])f=false;if(f){for(let y=0;y<N;y++)board[y][x]=0;n++}}
+ if(n){score+=n*100;document.getElementById("score").textContent=score}
+}
+function draw(){
+ ctx.clearRect(0,0,440,440);
+ for(let y=0;y<N;y++)for(let x=0;x<N;x++){ctx.strokeStyle="#263244";ctx.strokeRect(x*S,y*S,S,S);if(board[y][x]){ctx.fillStyle="#f5b400";ctx.fillRect(x*S+5,y*S+5,S-10,S-10)}}
+}
+async function auto(){
+ if(!token)return;
+ try{const r=await fetch("/api/me",{headers:{Authorization:"Bearer "+token}});if(!r.ok){localStorage.removeItem("ayep_token");return}me=await r.json();openApp()}catch(e){}
+}
+auto();
+</script>
+</body>
+</html>
